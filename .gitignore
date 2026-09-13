@@ -34,3 +34,4 @@ accepted_terms.txt
 dist/
 *.zip
 *.msi
+!driver/*.msi

@@ -41,7 +41,7 @@ Executing ARP redirection or traffic throttling on third-party networks without 
 
 ### Prerequisites
 - Windows 10 or Windows 11 (x64)
-- **Npcap** (or WinPcap) installed in WinPcap-compatible mode
+- **Win10Pcap / Npcap** installed (installer provided in the `driver/` folder)
 - Administrator privileges (required for raw packet capture and ARP manipulation)
 
 ### Build & Run
@@ -50,10 +50,10 @@ Executing ARP redirection or traffic throttling on third-party networks without 
 dotnet build SelfishNetModern\SelfishNetModern.csproj -c Release
 
 # Publish single folder win-x64 app
-dotnet publish SelfishNetModern\SelfishNetModern.csproj -c Release -r win-x64 --no-self-contained -o bin\publish
+dotnet publish SelfishNetModern\SelfishNetModern.csproj -c Release -r win-x64 --self-contained false -o bin\publish
 
-# Run launcher
-Run-SelfishNet.bat
+# Run executable directly (prompts UAC for admin privileges)
+.\bin\publish\SelfishNetModern.exe
 ```
 
 ### Running Automated Tests
