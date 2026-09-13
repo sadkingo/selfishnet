@@ -29,3 +29,8 @@ $RECYCLE.BIN/
 
 ## Runtime files
 accepted_terms.txt
+
+## Production Build & Distribution Artifacts
+dist/
+*.zip
+*.msi
