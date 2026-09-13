@@ -9,6 +9,7 @@ namespace SelfishNetModern.Models
     public class NetworkDevice : INotifyPropertyChanged
     {
         private string _hostname = "Unknown";
+        private string _customName = string.Empty;
         private string _vendor = "Unknown";
         private bool _isControlled = true;
         private bool _isBlocked;
@@ -29,8 +30,32 @@ namespace SelfishNetModern.Models
         public string Hostname
         {
             get => _hostname;
-            set { if (_hostname != value) { _hostname = value; OnPropertyChanged(); } }
+            set 
+            { 
+                if (_hostname != value) 
+                { 
+                    _hostname = value; 
+                    OnPropertyChanged(); 
+                    OnPropertyChanged(nameof(DisplayName)); 
+                } 
+            }
         }
+
+        public string CustomName
+        {
+            get => _customName;
+            set
+            {
+                if (_customName != value)
+                {
+                    _customName = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(DisplayName));
+                }
+            }
+        }
+
+        public string DisplayName => !string.IsNullOrWhiteSpace(_customName) ? _customName : Hostname;
 
         public string Vendor
         {

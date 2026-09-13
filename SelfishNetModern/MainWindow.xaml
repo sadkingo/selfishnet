@@ -301,7 +301,7 @@
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Hostname}" FontWeight="SemiBold" Foreground="{StaticResource TextLight}"/>
+                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{StaticResource TextLight}"/>
                                     <TextBlock Text="{Binding Vendor}" FontSize="11" Foreground="{StaticResource TextMuted}"/>
                                 </StackPanel>
                             </DataTemplate>

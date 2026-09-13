@@ -22,6 +22,7 @@ namespace SelfishNetTests
             TestDeviceControlDefaults();
             TestNativePcapDevice();
             TestTermsOfUse();
+            TestDeviceSettings();
 
             Console.WriteLine("\n🎉 ALL TESTS PASSED SUCCESSFULLY!");
         }
@@ -151,6 +152,55 @@ namespace SelfishNetTests
 
             bool hasAccepted = TermsOfUseDialog.HasAcceptedTerms();
             Console.WriteLine($"PASSED (Terms status: {(hasAccepted ? "Already Accepted" : "Pending First Run")})");
+        }
+
+        static void TestDeviceSettings()
+        {
+            Console.Write("[Test 7] Testing DeviceSettingsService MAC-based profile persistence... ");
+
+            string tempFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"test_device_profiles_{Guid.NewGuid()}.json");
+            try
+            {
+                var service = new DeviceSettingsService(tempFile);
+
+                var device1 = new NetworkDevice
+                {
+                    IP = IPAddress.Parse("192.168.1.188"),
+                    MAC = PhysicalAddress.Parse("12-34-56-78-9A-BC"),
+                    DownloadLimitKbps = 150,
+                    UploadLimitKbps = 60,
+                    IsBlocked = true,
+                    IsControlled = true,
+                    CustomName = "User's Gaming Phone"
+                };
+
+                service.SaveDevice(device1);
+                service.Flush();
+
+                // Reload from file using a fresh service instance
+                var freshService = new DeviceSettingsService(tempFile);
+
+                var newDiscoveredDevice = new NetworkDevice
+                {
+                    IP = IPAddress.Parse("192.168.1.188"),
+                    MAC = PhysicalAddress.Parse("12-34-56-78-9A-BC")
+                };
+
+                freshService.ApplyToDevice(newDiscoveredDevice);
+
+                Assert(newDiscoveredDevice.DownloadLimitKbps == 150, "Download limit should be restored");
+                Assert(newDiscoveredDevice.UploadLimitKbps == 60, "Upload limit should be restored");
+                Assert(newDiscoveredDevice.IsBlocked, "Blocked state should be restored");
+                Assert(newDiscoveredDevice.IsControlled, "Controlled state should be restored");
+                Assert(newDiscoveredDevice.CustomName == "User's Gaming Phone", "Custom name should be restored");
+                Assert(newDiscoveredDevice.DisplayName == "User's Gaming Phone", "DisplayName should return custom name");
+
+                Console.WriteLine("PASSED");
+            }
+            finally
+            {
+                if (System.IO.File.Exists(tempFile)) System.IO.File.Delete(tempFile);
+            }
         }
 
         static void Assert(bool condition, string message)

@@ -18,6 +18,7 @@ namespace SelfishNetModern.ViewModels
         private readonly ArpSpoofer _spoofer;
         private readonly TrafficController _controller;
         private readonly NetworkResilienceManager _resilience;
+        private readonly DeviceSettingsService _settingsService;
         private readonly Dispatcher _dispatcher;
 
         private AdapterInfo? _selectedAdapter;
@@ -147,6 +148,7 @@ namespace SelfishNetModern.ViewModels
             _scanner = new ArpScanner();
             _spoofer = new ArpSpoofer();
             _controller = new TrafficController();
+            _settingsService = new DeviceSettingsService();
             _resilience = new NetworkResilienceManager(_spoofer, _controller);
 
             // Wire scanner events
@@ -296,6 +298,13 @@ namespace SelfishNetModern.ViewModels
                     return;
                 }
 
+                // Apply any remembered profile/settings for this MAC address
+                if (_settingsService.TryGetProfile(device.MacString, out var savedProfile) && savedProfile != null)
+                {
+                    _settingsService.ApplyToDevice(device);
+                    AddLog($"Applied remembered settings for [{device.MacString}] ({device.IP}): DL={device.DownloadLimitDisplay}, UL={device.UploadLimitDisplay}, Blocked={device.IsBlocked}");
+                }
+
                 device.PropertyChanged += (s, e) =>
                 {
                     if (e.PropertyName == nameof(NetworkDevice.IsControlled))
@@ -315,6 +324,7 @@ namespace SelfishNetModern.ViewModels
                                 AddLog($"Stopped redirecting: {device.IP} ({device.MacString})");
                             }
                         }
+                        _settingsService.SaveDevice(device);
                         UpdateDeviceCounts();
                     }
                     else if (e.PropertyName == nameof(NetworkDevice.IsBlocked))
@@ -334,7 +344,14 @@ namespace SelfishNetModern.ViewModels
                                 }
                             }
                         }
+                        _settingsService.SaveDevice(device);
                         UpdateDeviceCounts();
+                    }
+                    else if (e.PropertyName == nameof(NetworkDevice.DownloadLimitKbps) ||
+                             e.PropertyName == nameof(NetworkDevice.UploadLimitKbps) ||
+                             e.PropertyName == nameof(NetworkDevice.CustomName))
+                    {
+                        _settingsService.SaveDevice(device);
                     }
                 };
 
@@ -486,6 +503,8 @@ namespace SelfishNetModern.ViewModels
                     _spoofer.RemoveControlledDevice(dev);
                     _controller.UnregisterDevice(dev);
                 }
+
+                _settingsService.SaveDevice(dev);
             }
             UpdateDeviceCounts();
             AddLog("Reset all limits and released control for all devices.");
@@ -530,6 +549,7 @@ namespace SelfishNetModern.ViewModels
             _spoofer.Stop();
             _controller.Stop();
             _scanner.StopScan();
+            _settingsService.Flush();
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
