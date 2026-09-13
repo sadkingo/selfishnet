@@ -14,4 +14,10 @@
     <PackageReference Include="SharpPcap" Version="6.3.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="libs\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

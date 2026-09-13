@@ -116,8 +116,8 @@ namespace SelfishNetModern.Services
                     return;
                 }
 
-                // Fast broadcast ARP pings using raw socket/SharpPcap if opened
-                if (adapter.PcapDevice != null)
+                // Fast broadcast ARP pings using NativeDevice if opened
+                if (adapter.NativeDevice != null)
                 {
                     try
                     {
@@ -147,7 +147,7 @@ namespace SelfishNetModern.Services
 
                             try
                             {
-                                adapter.PcapDevice.SendPacket(eth.Bytes);
+                                adapter.NativeDevice.SendPacket(eth.Bytes);
                             }
                             catch { }
 

@@ -301,23 +301,41 @@ namespace SelfishNetModern.ViewModels
                 IsRedirecting = false;
                 StatusMessage = "Traffic control stopped. All caches restored.";
                 AddLog("Traffic redirection deactivated.");
+                UpdateDeviceCounts();
             }
             else
             {
-                // Start
+                // Ensure adapters are bound
+                _spoofer.SetAdapter(SelectedAdapter);
+                _controller.SetAdapter(SelectedAdapter);
+
+                // Auto-control all non-gateway, non-self devices if none are checked
+                var targetDevs = Devices.Where(d => !d.IsGateway && !d.IsSelf).ToList();
+                if (!targetDevs.Any(d => d.IsControlled))
+                {
+                    foreach (var dev in targetDevs)
+                    {
+                        dev.IsControlled = true;
+                    }
+                }
+
+                // Start engines
                 _spoofer.Start();
                 _controller.Start();
 
                 // Register all currently controlled devices
+                int controlledCount = 0;
                 foreach (var dev in Devices.Where(d => d.IsControlled && !d.IsGateway && !d.IsSelf))
                 {
                     _spoofer.AddControlledDevice(dev);
                     _controller.RegisterDevice(dev);
+                    controlledCount++;
                 }
 
                 IsRedirecting = true;
-                StatusMessage = "Traffic control and redirection ACTIVE.";
-                AddLog("Traffic redirection activated.");
+                StatusMessage = $"Traffic control ACTIVE ({controlledCount} device(s) redirected).";
+                AddLog($"Traffic redirection activated for {controlledCount} device(s).");
+                UpdateDeviceCounts();
             }
         }
 

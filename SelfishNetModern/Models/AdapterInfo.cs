@@ -15,6 +15,7 @@ namespace SelfishNetModern.Models
         public IPAddress? GatewayIp { get; set; }
         public PhysicalAddress? GatewayMac { get; set; }
         public ILiveDevice? PcapDevice { get; set; }
+        public SelfishNetModern.Services.NativePcapDevice? NativeDevice { get; set; }
 
         public string DisplayName => $"{Name} ({IpAddress}) - {Description}";
 

@@ -47,7 +47,7 @@ namespace SelfishNetModern.Services
         public void Start()
         {
             if (IsRunning) return;
-            if (_adapter == null || _adapter.PcapDevice == null || _adapter.GatewayIp == null || _adapter.GatewayMac == null)
+            if (_adapter == null || _adapter.NativeDevice == null || _adapter.GatewayIp == null || _adapter.GatewayMac == null)
             {
                 LogMessage?.Invoke("Cannot start ARP spoofer: Adapter or Gateway information missing.");
                 return;
@@ -108,7 +108,7 @@ namespace SelfishNetModern.Services
 
         private void SendPoisonPulseForDevice(NetworkDevice device)
         {
-            if (_adapter?.PcapDevice == null || _adapter.GatewayIp == null || _adapter.GatewayMac == null)
+            if (_adapter?.NativeDevice == null || _adapter.GatewayIp == null || _adapter.GatewayMac == null)
                 return;
 
             try
@@ -139,7 +139,7 @@ namespace SelfishNetModern.Services
 
         public void HealDevice(NetworkDevice device)
         {
-            if (_adapter?.PcapDevice == null || _adapter.GatewayIp == null || _adapter.GatewayMac == null)
+            if (_adapter?.NativeDevice == null || _adapter.GatewayIp == null || _adapter.GatewayMac == null)
                 return;
 
             try
@@ -208,7 +208,7 @@ namespace SelfishNetModern.Services
         {
             try
             {
-                _adapter?.PcapDevice?.SendPacket(packetBytes);
+                _adapter?.NativeDevice?.SendPacket(packetBytes);
             }
             catch
             {

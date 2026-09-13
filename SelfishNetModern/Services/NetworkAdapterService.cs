@@ -76,16 +76,6 @@ namespace SelfishNetModern.Services
         public static List<AdapterInfo> GetAvailableAdapters()
         {
             var adapters = new List<AdapterInfo>();
-            CaptureDeviceList pcapDevices;
-            try
-            {
-                pcapDevices = CaptureDeviceList.Instance;
-                pcapDevices.Refresh();
-            }
-            catch
-            {
-                pcapDevices = null!;
-            }
 
             var netInterfaces = NetworkInterface.GetAllNetworkInterfaces()
                 .Where(ni => ni.OperationalStatus == OperationalStatus.Up &&
@@ -105,26 +95,12 @@ namespace SelfishNetModern.Services
                     .FirstOrDefault(g => g.Address.AddressFamily == AddressFamily.InterNetwork);
 
                 var localMac = ni.GetPhysicalAddress();
-                var localMacBytes = localMac.GetAddressBytes();
 
-                ILiveDevice? matchedPcapDevice = null;
-                if (pcapDevices != null)
+                NativePcapDevice? nativeDev = new NativePcapDevice();
+                if (!nativeDev.Open(ni.Id))
                 {
-                    foreach (var dev in pcapDevices)
-                    {
-                        if (dev.MacAddress != null && dev.MacAddress.Equals(localMac))
-                        {
-                            matchedPcapDevice = dev;
-                            break;
-                        }
-
-                        // Fallback match on device name/ID
-                        if (!string.IsNullOrEmpty(dev.Name) && dev.Name.Contains(ni.Id, StringComparison.OrdinalIgnoreCase))
-                        {
-                            matchedPcapDevice = dev;
-                            break;
-                        }
-                    }
+                    nativeDev.Dispose();
+                    nativeDev = null;
                 }
 
                 var adapterInfo = new AdapterInfo
@@ -136,7 +112,7 @@ namespace SelfishNetModern.Services
                     SubnetMask = ipv4.IPv4Mask ?? IPAddress.Parse("255.255.255.0"),
                     MacAddress = localMac,
                     GatewayIp = gateway?.Address,
-                    PcapDevice = matchedPcapDevice
+                    NativeDevice = nativeDev
                 };
 
                 if (adapterInfo.GatewayIp != null)
@@ -153,8 +129,11 @@ namespace SelfishNetModern.Services
         public static AdapterInfo? GetDefaultAdapter()
         {
             var adapters = GetAvailableAdapters();
-            // Prioritize adapter that has a gateway and gateway MAC resolved
-            return adapters.FirstOrDefault(a => a.GatewayIp != null && a.GatewayMac != null && !a.GatewayMac.Equals(PhysicalAddress.None))
+            // Prioritize adapter that has an active capture device AND gateway resolved
+            return adapters.FirstOrDefault(a => a.NativeDevice != null && a.GatewayIp != null && a.GatewayMac != null && !a.GatewayMac.Equals(PhysicalAddress.None))
+                ?? adapters.FirstOrDefault(a => a.NativeDevice != null && a.GatewayIp != null)
+                ?? adapters.FirstOrDefault(a => a.NativeDevice != null)
+                ?? adapters.FirstOrDefault(a => a.GatewayIp != null && a.GatewayMac != null && !a.GatewayMac.Equals(PhysicalAddress.None))
                 ?? adapters.FirstOrDefault(a => a.GatewayIp != null)
                 ?? adapters.FirstOrDefault();
         }

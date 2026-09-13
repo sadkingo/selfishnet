@@ -10,7 +10,7 @@ namespace SelfishNetModern.Models
     {
         private string _hostname = "Unknown";
         private string _vendor = "Unknown";
-        private bool _isControlled;
+        private bool _isControlled = true;
         private bool _isBlocked;
         private int _downloadLimitKbps; // 0 = Unlimited
         private int _uploadLimitKbps;   // 0 = Unlimited
@@ -40,9 +40,10 @@ namespace SelfishNetModern.Models
 
         public bool IsControlled
         {
-            get => _isControlled;
+            get => !IsGateway && !IsSelf && _isControlled;
             set
             {
+                if (IsGateway || IsSelf) return;
                 if (_isControlled != value)
                 {
                     _isControlled = value;

@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Threading;
-using System.Threading.Tasks;
 using PacketDotNet;
+using PacketDotNet.Utils;
 using SelfishNetModern.Models;
-using SharpPcap;
 
 namespace SelfishNetModern.Services
 {
@@ -72,34 +72,15 @@ namespace SelfishNetModern.Services
         public void Start()
         {
             if (IsCapturing) return;
-            if (_adapter?.PcapDevice == null)
+            if (_adapter?.NativeDevice == null || !_adapter.NativeDevice.IsOpen)
             {
-                LogMessage?.Invoke("Traffic controller cannot start: No pcap device.");
+                LogMessage?.Invoke("Traffic controller cannot start: No active pcap device.");
                 return;
             }
 
             try
             {
-                var dev = _adapter.PcapDevice;
-                try
-                {
-                    dev.Open(DeviceModes.Promiscuous, 1);
-                }
-                catch
-                {
-                    // Device might already be open
-                }
-
-                // Filter IP packets
-                try
-                {
-                    dev.Filter = "ip";
-                }
-                catch
-                {
-                    // Filter could fail if WinPcap not elevated, ignore filter and filter in software
-                }
-
+                var dev = _adapter.NativeDevice;
                 dev.OnPacketArrival += OnPacketArrival;
                 dev.StartCapture();
 
@@ -124,15 +105,10 @@ namespace SelfishNetModern.Services
                 _speedMeterTimer?.Dispose();
                 _speedMeterTimer = null;
 
-                if (_adapter?.PcapDevice != null)
+                if (_adapter?.NativeDevice != null)
                 {
-                    var dev = _adapter.PcapDevice;
-                    dev.OnPacketArrival -= OnPacketArrival;
-                    if (dev.Started)
-                    {
-                        dev.StopCapture();
-                    }
-                    try { dev.Close(); } catch { }
+                    _adapter.NativeDevice.OnPacketArrival -= OnPacketArrival;
+                    _adapter.NativeDevice.StopCapture();
                 }
 
                 TotalDownloadKbps = 0;
@@ -154,33 +130,27 @@ namespace SelfishNetModern.Services
             }
         }
 
-        private void OnPacketArrival(object sender, PacketCapture e)
+        private void OnPacketArrival(PcapHeader header, byte[] rawBytes)
         {
             if (_adapter == null || _adapter.GatewayMac == null) return;
+            if (rawBytes.Length < 14) return;
 
             try
             {
-                var rawPacket = e.GetPacket();
-                var rawBytes = rawPacket.Data;
-                if (rawBytes.Length < 14) return; // Minimum Ethernet header size
-
-                // Parse Ethernet header
-                var ethernetPacket = Packet.ParsePacket(rawPacket.LinkLayerType, rawBytes) as EthernetPacket;
-                if (ethernetPacket == null) return;
-
+                var ethernetPacket = new EthernetPacket(new ByteArraySegment(rawBytes));
                 var srcMac = ethernetPacket.SourceHardwareAddress;
                 var dstMac = ethernetPacket.DestinationHardwareAddress;
 
-                // Only intercept packets destined to our MAC
+                // Only inspect frames destined for our MAC (promiscuous MITM capture)
                 if (!dstMac.Equals(_adapter.MacAddress)) return;
 
-                var ipPacket = ethernetPacket.Extract<IPv4Packet>();
+                var ipPacket = ethernetPacket.PayloadPacket as IPv4Packet;
                 if (ipPacket == null) return;
 
                 var srcIp = ipPacket.SourceAddress;
                 var dstIp = ipPacket.DestinationAddress;
 
-                // Ignore packets genuinely destined for or originating from our own IP
+                // Ignore packets genuinely destined for or originating from our own PC IP
                 if (dstIp.Equals(_adapter.IpAddress) || srcIp.Equals(_adapter.IpAddress))
                     return;
 
@@ -211,7 +181,7 @@ namespace SelfishNetModern.Services
                     ethernetPacket.DestinationHardwareAddress = targetDevice.MAC;
                     ethernetPacket.SourceHardwareAddress = _adapter.MacAddress;
 
-                    _adapter.PcapDevice?.SendPacket(ethernetPacket.Bytes);
+                    _adapter.NativeDevice?.SendPacket(ethernetPacket.Bytes);
                     return;
                 }
 
@@ -244,7 +214,7 @@ namespace SelfishNetModern.Services
                     ethernetPacket.DestinationHardwareAddress = _adapter.GatewayMac;
                     ethernetPacket.SourceHardwareAddress = _adapter.MacAddress;
 
-                    _adapter.PcapDevice?.SendPacket(ethernetPacket.Bytes);
+                    _adapter.NativeDevice?.SendPacket(ethernetPacket.Bytes);
                 }
             }
             catch
@@ -270,9 +240,9 @@ namespace SelfishNetModern.Services
             double totalDl = 0;
             double totalUl = 0;
 
-            foreach (var kvp in _controlledDevices)
+            // Use distinct devices to avoid double-counting due to IP & MAC dictionary keys
+            foreach (var device in _controlledDevices.Values.Distinct())
             {
-                var device = kvp.Value;
                 if (_intervalBytes.TryRemove(device.MacString, out var bytes))
                 {
                     double dlKbps = (bytes.dlBytes / 1024.0) / elapsedSec;
