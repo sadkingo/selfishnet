@@ -155,7 +155,9 @@ namespace SelfishNetModern.ViewModels
             _scanner.ScanCompleted += () => _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
             {
                 IsScanning = false;
-                StatusMessage = $"Scan completed. Found {Devices.Count} active device(s).";
+                StatusMessage = IsRedirecting 
+                    ? $"Traffic control ACTIVE ({ControlledDeviceCount} device(s) redirected)."
+                    : $"Scan completed. Found {Devices.Count} active device(s).";
                 AddLog($"Scan finished. {Devices.Count} devices detected on subnet.");
                 UpdateDeviceCounts();
             });
@@ -242,7 +244,12 @@ namespace SelfishNetModern.ViewModels
         {
             if (SelectedAdapter == null || IsScanning) return;
 
-            Devices.Clear();
+            // Only clear devices if we are not actively redirecting, preserving live traffic control & table state
+            if (!IsRedirecting)
+            {
+                Devices.Clear();
+            }
+
             IsScanning = true;
             ScanProgress = 0;
             StatusMessage = "Scanning local subnet for active devices...";
@@ -272,20 +279,76 @@ namespace SelfishNetModern.ViewModels
             {
                 var existing = Devices.FirstOrDefault(d => d.MacString.Equals(device.MacString, StringComparison.OrdinalIgnoreCase) ||
                                                            d.IP.Equals(device.IP));
-                if (existing == null)
+                if (existing != null)
                 {
-                    device.PropertyChanged += (s, e) =>
-                    {
-                        if (e.PropertyName == nameof(NetworkDevice.IsControlled) ||
-                            e.PropertyName == nameof(NetworkDevice.IsBlocked))
-                        {
-                            UpdateDeviceCounts();
-                        }
-                    };
+                    if (string.IsNullOrEmpty(existing.Hostname) && !string.IsNullOrEmpty(device.Hostname))
+                        existing.Hostname = device.Hostname;
+                    if (string.IsNullOrEmpty(existing.Vendor) && !string.IsNullOrEmpty(device.Vendor))
+                        existing.Vendor = device.Vendor;
+                    existing.LastSeen = DateTime.Now;
 
-                    Devices.Add(device);
-                    UpdateDeviceCounts();
+                    // If redirecting is currently active and device is controlled, ensure it's in the spoofer & controller
+                    if (IsRedirecting && existing.IsControlled && !existing.IsGateway && !existing.IsSelf)
+                    {
+                        _spoofer.AddControlledDevice(existing);
+                        _controller.RegisterDevice(existing);
+                    }
+                    return;
                 }
+
+                device.PropertyChanged += (s, e) =>
+                {
+                    if (e.PropertyName == nameof(NetworkDevice.IsControlled))
+                    {
+                        if (IsRedirecting && !device.IsGateway && !device.IsSelf)
+                        {
+                            if (device.IsControlled)
+                            {
+                                _spoofer.AddControlledDevice(device);
+                                _controller.RegisterDevice(device);
+                                AddLog($"Started redirecting: {device.IP} ({device.MacString})");
+                            }
+                            else
+                            {
+                                _spoofer.RemoveControlledDevice(device);
+                                _controller.UnregisterDevice(device);
+                                AddLog($"Stopped redirecting: {device.IP} ({device.MacString})");
+                            }
+                        }
+                        UpdateDeviceCounts();
+                    }
+                    else if (e.PropertyName == nameof(NetworkDevice.IsBlocked))
+                    {
+                        if (IsRedirecting && !device.IsGateway && !device.IsSelf)
+                        {
+                            if (device.IsBlocked)
+                            {
+                                if (!device.IsControlled)
+                                {
+                                    device.IsControlled = true; // Will trigger IsControlled handler above
+                                }
+                                else
+                                {
+                                    _spoofer.AddControlledDevice(device);
+                                    _controller.RegisterDevice(device);
+                                }
+                            }
+                        }
+                        UpdateDeviceCounts();
+                    }
+                };
+
+                Devices.Add(device);
+
+                // If redirection is currently active, immediately auto-redirect this new device!
+                if (IsRedirecting && device.IsControlled && !device.IsGateway && !device.IsSelf)
+                {
+                    _spoofer.AddControlledDevice(device);
+                    _controller.RegisterDevice(device);
+                    AddLog($"Auto-redirected newly discovered device: {device.IP} ({device.MacString})");
+                }
+
+                UpdateDeviceCounts();
             });
         }
 
@@ -319,9 +382,10 @@ namespace SelfishNetModern.ViewModels
                     }
                 }
 
-                // Start engines
+                // Start engines and mark active
                 _spoofer.Start();
                 _controller.Start();
+                IsRedirecting = true;
 
                 // Register all currently controlled devices
                 int controlledCount = 0;
@@ -332,7 +396,6 @@ namespace SelfishNetModern.ViewModels
                     controlledCount++;
                 }
 
-                IsRedirecting = true;
                 StatusMessage = $"Traffic control ACTIVE ({controlledCount} device(s) redirected).";
                 AddLog($"Traffic redirection activated for {controlledCount} device(s).");
                 UpdateDeviceCounts();
@@ -442,6 +505,10 @@ namespace SelfishNetModern.ViewModels
             OnPropertyChanged(nameof(ControlledDeviceCount));
             OnPropertyChanged(nameof(BlockedDeviceCount));
             OnPropertyChanged(nameof(TotalDeviceCount));
+            if (IsRedirecting)
+            {
+                StatusMessage = $"Traffic control ACTIVE ({ControlledDeviceCount} device(s) redirected).";
+            }
         }
 
         public void AddLog(string message)
