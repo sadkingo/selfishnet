@@ -6,13 +6,24 @@
         Height="780" Width="1200"
         MinHeight="600" MinWidth="960"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource BgDark}">
+        WindowStyle="None"
+        WindowState="Maximized"
+        Background="{StaticResource BgDark}"
+        StateChanged="Window_StateChanged">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="64"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="0"
+                      CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
 
     <Window.DataContext>
         <vm:MainViewModel/>
     </Window.DataContext>
 
-    <Grid Margin="20">
+    <Grid x:Name="MainContainer" Margin="8">
         <Grid.RowDefinitions>
             <!-- Header -->
             <RowDefinition Height="Auto"/>
@@ -26,7 +37,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 1. HEADER -->
+        <!-- 1. HEADER & CUSTOM TITLE BAR -->
         <Border Grid.Row="0" Background="{StaticResource SurfaceDark}" CornerRadius="12" Padding="16,12" Margin="0,0,0,16" BorderBrush="{StaticResource BorderDark}" BorderThickness="1">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -56,10 +67,12 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <TextBlock Text="Interface:" VerticalAlignment="Center" Foreground="{StaticResource TextMuted}" FontSize="12" Margin="0,0,8,0"/>
                     <ComboBox ItemsSource="{Binding Adapters}" SelectedItem="{Binding SelectedAdapter}" DisplayMemberPath="DisplayName" 
-                              Width="340" Height="32" VerticalContentAlignment="Center" Background="#181825" Foreground="{StaticResource TextLight}"/>
+                              Width="340" Height="32" VerticalContentAlignment="Center" Background="#181825" Foreground="{StaticResource TextLight}"
+                              WindowChrome.IsHitTestVisibleInChrome="True"/>
                     
                     <Button Command="{Binding RefreshAdaptersCommand}" Content="🔄" Width="32" Height="32" Margin="6,0,14,0" 
-                            Style="{StaticResource ModernButton}" ToolTip="Refresh Adapters"/>
+                            Style="{StaticResource ModernButton}" ToolTip="Refresh Adapters"
+                            WindowChrome.IsHitTestVisibleInChrome="True"/>
 
                     <!-- Local IP Pill -->
                     <Border Background="#181825" CornerRadius="6" Padding="10,6" Margin="0,0,8,0" BorderBrush="{StaticResource BorderDark}" BorderThickness="1">
@@ -78,10 +91,30 @@
                     </Border>
                 </StackPanel>
 
-                <!-- Right Header Actions (Terms & Help) -->
+                <!-- Right Header Actions (Terms & Window Controls) -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Command="{Binding ShowTermsCommand}" Content="🛡️ Terms of Use" Style="{StaticResource ModernButton}" 
-                            Background="#252538" Foreground="{StaticResource TextMuted}" FontSize="11" Padding="10,6"/>
+                    <Button Command="{Binding ShowTermsCommand}" Content="🛡️ Terms of Use" Style="{StaticResource HeaderButton}" 
+                            WindowChrome.IsHitTestVisibleInChrome="True" Margin="0,0,12,0"/>
+                    
+                    <Border Width="1" Height="20" Background="{StaticResource BorderDark}" Margin="0,0,10,0"/>
+
+                    <!-- Minimize Button -->
+                    <Button x:Name="MinimizeBtn" Click="MinimizeButton_Click" Style="{StaticResource WindowCaptionButton}" 
+                            ToolTip="Minimize" WindowChrome.IsHitTestVisibleInChrome="True">
+                        <TextBlock Text="—" FontSize="13" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Button>
+
+                    <!-- Maximize / Restore Button -->
+                    <Button x:Name="MaximizeBtn" Click="MaximizeButton_Click" Style="{StaticResource WindowCaptionButton}" 
+                            ToolTip="Restore" WindowChrome.IsHitTestVisibleInChrome="True">
+                        <TextBlock x:Name="MaximizeIcon" Text="❐" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Button>
+
+                    <!-- Close Button -->
+                    <Button x:Name="CloseBtn" Click="CloseButton_Click" Style="{StaticResource WindowCloseButton}" 
+                            ToolTip="Close" WindowChrome.IsHitTestVisibleInChrome="True">
+                        <TextBlock Text="✕" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
@@ -147,21 +180,24 @@
 
                 <!-- Scan Button -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <Button Command="{Binding ScanCommand}" Style="{StaticResource ModernButton}" Background="{StaticResource AccentBlue}" Foreground="#11111B" 
+                    <Button Command="{Binding ScanCommand}" Style="{StaticResource PrimaryButton}" 
                             Content="🔍 Scan Network" Height="36" Padding="18,0" Margin="0,0,12,0"/>
                     
                     <!-- Redirect Start/Stop Button -->
                     <Button Command="{Binding ToggleRedirectCommand}" 
-                            Content="{Binding RedirectButtonText}" Height="36" Padding="18,0" Margin="0,0,12,0" FontWeight="Bold">
+                            Content="{Binding RedirectButtonText}" Height="36" Padding="20,0" Margin="0,0,12,0" FontWeight="Bold" FontSize="13">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource ModernButton}">
+                                <Setter Property="BorderThickness" Value="1"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsRedirecting}" Value="True">
                                         <Setter Property="Background" Value="#F38BA8"/>
+                                        <Setter Property="BorderBrush" Value="#E78284"/>
                                         <Setter Property="Foreground" Value="#11111B"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsRedirecting}" Value="False">
                                         <Setter Property="Background" Value="#A6E3A1"/>
+                                        <Setter Property="BorderBrush" Value="#94E2D5"/>
                                         <Setter Property="Foreground" Value="#11111B"/>
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -190,11 +226,11 @@
                 <!-- Quick Batch Controls -->
                 <StackPanel Grid.Column="3" Orientation="Horizontal">
                     <Button Command="{Binding BlockAllCommand}" Content="🚫 Block All" Style="{StaticResource ModernButton}" 
-                            Background="#313244" Foreground="{StaticResource AccentRed}" Height="34" Margin="0,0,8,0" Padding="12,0"/>
+                            Background="#252538" BorderBrush="#F38BA8" Foreground="{StaticResource AccentRed}" Height="34" Margin="0,0,8,0" Padding="14,0"/>
                     <Button Command="{Binding UnblockAllCommand}" Content="🔓 Unblock All" Style="{StaticResource ModernButton}" 
-                            Background="#313244" Foreground="{StaticResource AccentGreen}" Height="34" Margin="0,0,8,0" Padding="12,0"/>
+                            Background="#252538" BorderBrush="#A6E3A1" Foreground="{StaticResource AccentGreen}" Height="34" Margin="0,0,8,0" Padding="14,0"/>
                     <Button Command="{Binding ResetAllLimitsCommand}" Content="🔄 Reset All" Style="{StaticResource ModernButton}" 
-                            Background="#313244" Foreground="{StaticResource TextLight}" Height="34" Padding="12,0"/>
+                            Background="#252538" BorderBrush="#45475A" Foreground="{StaticResource TextLight}" Height="34" Padding="14,0"/>
                 </StackPanel>
             </Grid>
         </Border>
