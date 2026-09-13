@@ -207,8 +207,13 @@ namespace SelfishNetModern.ViewModels
             RefreshAdaptersCommand = new RelayCommand(LoadAdapters);
             ShowTermsCommand = new RelayCommand(ExecuteShowTerms);
 
-            // Initialize adapters
+            // Initialize adapters, auto-start redirect by default, and begin subnet scan
             LoadAdapters();
+            if (SelectedAdapter != null)
+            {
+                StartRedirecting();
+                ExecuteScan();
+            }
         }
 
         public void LoadAdapters()
@@ -289,9 +294,10 @@ namespace SelfishNetModern.ViewModels
                         existing.Vendor = device.Vendor;
                     existing.LastSeen = DateTime.Now;
 
-                    // If redirecting is currently active and device is controlled, ensure it's in the spoofer & controller
-                    if (IsRedirecting && existing.IsControlled && !existing.IsGateway && !existing.IsSelf)
+                    // If redirecting is currently active, ensure this device is controlled and in the spoofer & controller
+                    if (IsRedirecting && !existing.IsGateway && !existing.IsSelf)
                     {
+                        existing.IsControlled = true;
                         _spoofer.AddControlledDevice(existing);
                         _controller.RegisterDevice(existing);
                     }
@@ -303,6 +309,12 @@ namespace SelfishNetModern.ViewModels
                 {
                     _settingsService.ApplyToDevice(device);
                     AddLog($"Applied remembered settings for [{device.MacString}] ({device.IP}): DL={device.DownloadLimitDisplay}, UL={device.UploadLimitDisplay}, Blocked={device.IsBlocked}");
+                }
+
+                // When scanning, ensure all devices are set to controlled by default
+                if (!device.IsGateway && !device.IsSelf)
+                {
+                    device.IsControlled = true;
                 }
 
                 device.PropertyChanged += (s, e) =>
@@ -369,6 +381,41 @@ namespace SelfishNetModern.ViewModels
             });
         }
 
+        private void StartRedirecting()
+        {
+            if (SelectedAdapter == null) return;
+
+            // Ensure adapters are bound
+            _spoofer.SetAdapter(SelectedAdapter);
+            _controller.SetAdapter(SelectedAdapter);
+
+            // Auto-control all non-gateway, non-self devices
+            foreach (var dev in Devices.Where(d => !d.IsGateway && !d.IsSelf))
+            {
+                dev.IsControlled = true;
+            }
+
+            // Start engines and mark active
+            _spoofer.Start();
+            _controller.Start();
+            IsRedirecting = true;
+
+            // Register all currently controlled devices
+            int controlledCount = 0;
+            foreach (var dev in Devices.Where(d => d.IsControlled && !d.IsGateway && !d.IsSelf))
+            {
+                _spoofer.AddControlledDevice(dev);
+                _controller.RegisterDevice(dev);
+                controlledCount++;
+            }
+
+            StatusMessage = $"Traffic control ACTIVE ({controlledCount} device(s) redirected).";
+            AddLog(controlledCount > 0 
+                ? $"Traffic redirection activated for {controlledCount} device(s)."
+                : "Traffic redirection engine started (monitoring incoming scan devices).");
+            UpdateDeviceCounts();
+        }
+
         private void ExecuteToggleRedirect()
         {
             if (SelectedAdapter == null) return;
@@ -385,37 +432,7 @@ namespace SelfishNetModern.ViewModels
             }
             else
             {
-                // Ensure adapters are bound
-                _spoofer.SetAdapter(SelectedAdapter);
-                _controller.SetAdapter(SelectedAdapter);
-
-                // Auto-control all non-gateway, non-self devices if none are checked
-                var targetDevs = Devices.Where(d => !d.IsGateway && !d.IsSelf).ToList();
-                if (!targetDevs.Any(d => d.IsControlled))
-                {
-                    foreach (var dev in targetDevs)
-                    {
-                        dev.IsControlled = true;
-                    }
-                }
-
-                // Start engines and mark active
-                _spoofer.Start();
-                _controller.Start();
-                IsRedirecting = true;
-
-                // Register all currently controlled devices
-                int controlledCount = 0;
-                foreach (var dev in Devices.Where(d => d.IsControlled && !d.IsGateway && !d.IsSelf))
-                {
-                    _spoofer.AddControlledDevice(dev);
-                    _controller.RegisterDevice(dev);
-                    controlledCount++;
-                }
-
-                StatusMessage = $"Traffic control ACTIVE ({controlledCount} device(s) redirected).";
-                AddLog($"Traffic redirection activated for {controlledCount} device(s).");
-                UpdateDeviceCounts();
+                StartRedirecting();
             }
         }
 
