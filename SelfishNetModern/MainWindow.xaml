@@ -70,7 +70,8 @@
                               Width="340" Height="32" VerticalContentAlignment="Center" Background="#181825" Foreground="{StaticResource TextLight}"
                               WindowChrome.IsHitTestVisibleInChrome="True"/>
                     
-                    <Button Command="{Binding RefreshAdaptersCommand}" Content="🔄" Width="32" Height="32" Margin="6,0,14,0" 
+                    <Button Command="{Binding RefreshAdaptersCommand}" Content="🔄" Width="32" Height="32" Padding="0" Margin="6,0,14,0" 
+                            VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
                             Style="{StaticResource ModernButton}" ToolTip="Refresh Adapters"
                             WindowChrome.IsHitTestVisibleInChrome="True"/>
 
@@ -226,11 +227,11 @@
                 <!-- Quick Batch Controls -->
                 <StackPanel Grid.Column="3" Orientation="Horizontal">
                     <Button Command="{Binding BlockAllCommand}" Content="🚫 Block All" Style="{StaticResource ModernButton}" 
-                            Background="#252538" BorderBrush="#F38BA8" Foreground="{StaticResource AccentRed}" Height="34" Margin="0,0,8,0" Padding="14,0"/>
+                            Background="#252538" BorderBrush="#F38BA8" Foreground="{StaticResource AccentRed}" Height="36" Margin="0,0,8,0" Padding="14,0" VerticalContentAlignment="Center"/>
                     <Button Command="{Binding UnblockAllCommand}" Content="🔓 Unblock All" Style="{StaticResource ModernButton}" 
-                            Background="#252538" BorderBrush="#A6E3A1" Foreground="{StaticResource AccentGreen}" Height="34" Margin="0,0,8,0" Padding="14,0"/>
+                            Background="#252538" BorderBrush="#A6E3A1" Foreground="{StaticResource AccentGreen}" Height="36" Margin="0,0,8,0" Padding="14,0" VerticalContentAlignment="Center"/>
                     <Button Command="{Binding ResetAllLimitsCommand}" Content="🔄 Reset All" Style="{StaticResource ModernButton}" 
-                            Background="#252538" BorderBrush="#45475A" Foreground="{StaticResource TextLight}" Height="34" Padding="14,0"/>
+                            Background="#252538" BorderBrush="#45475A" Foreground="{StaticResource TextLight}" Height="36" Padding="14,0" VerticalContentAlignment="Center"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -384,20 +385,28 @@
                     </DataGridTemplateColumn>
 
                     <!-- Block Toggle Button -->
-                    <DataGridTemplateColumn Header="Block" Width="90">
+                    <DataGridTemplateColumn Header="Block" Width="96">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <Button Content="BLOCK" Width="64" Height="28" FontWeight="Bold" FontSize="11"
+                                <Button Width="76" Height="30" Padding="0"
+                                        VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
                                         Command="{Binding DataContext.ToggleBlockDeviceCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                         CommandParameter="{Binding}">
                                     <Button.Style>
                                         <Style TargetType="Button" BasedOn="{StaticResource ModernButton}">
                                             <Setter Property="Background" Value="#313244"/>
                                             <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+                                            <Setter Property="Content" Value="BLOCK"/>
+                                            <Setter Property="FontWeight" Value="Bold"/>
+                                            <Setter Property="FontSize" Value="11"/>
+                                            <Setter Property="Padding" Value="0"/>
+                                            <Setter Property="VerticalContentAlignment" Value="Center"/>
+                                            <Setter Property="HorizontalContentAlignment" Value="Center"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsBlocked}" Value="True">
                                                     <Setter Property="Background" Value="{StaticResource AccentRed}"/>
                                                     <Setter Property="Foreground" Value="#11111B"/>
+                                                    <Setter Property="Content" Value="BLOCKED"/>
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsGateway}" Value="True">
                                                     <Setter Property="IsEnabled" Value="False"/>
