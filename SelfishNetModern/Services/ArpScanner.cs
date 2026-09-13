@@ -6,7 +6,9 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
+using PacketDotNet;
 using SelfishNetModern.Models;
+using SharpPcap;
 
 namespace SelfishNetModern.Services
 {
@@ -27,17 +29,14 @@ namespace SelfishNetModern.Services
             _scanCts = new CancellationTokenSource();
             var token = _scanCts.Token;
 
+            // Ensure we are running on a background thread pool thread
+            await Task.Yield();
+
             try
             {
-                var ips = adapter.GetSubnetIps();
-                if (ips.Count == 0)
-                {
-                    ScanCompleted?.Invoke();
-                    IsScanning = false;
-                    return;
-                }
+                var discoveredDevices = new ConcurrentDictionary<string, NetworkDevice>(StringComparer.OrdinalIgnoreCase);
 
-                // Make sure Gateway is always listed first if known
+                // 1. Add Gateway immediately
                 if (adapter.GatewayIp != null)
                 {
                     var gwMac = adapter.GatewayMac ?? NetworkAdapterService.ResolveMac(adapter.GatewayIp, adapter.IpAddress);
@@ -51,11 +50,14 @@ namespace SelfishNetModern.Services
                             Vendor = MacVendorService.GetVendor(gwMac),
                             Hostname = "Default Gateway (Router)"
                         };
-                        DeviceFound?.Invoke(gwDevice);
+                        if (discoveredDevices.TryAdd(gwMac.ToString(), gwDevice))
+                        {
+                            DeviceFound?.Invoke(gwDevice);
+                        }
                     }
                 }
 
-                // Add Self
+                // 2. Add Self immediately
                 var selfDevice = new NetworkDevice
                 {
                     IP = adapter.IpAddress,
@@ -64,13 +66,105 @@ namespace SelfishNetModern.Services
                     Vendor = MacVendorService.GetVendor(adapter.MacAddress),
                     Hostname = Environment.MachineName
                 };
-                DeviceFound?.Invoke(selfDevice);
+                if (discoveredDevices.TryAdd(adapter.MacAddress.ToString(), selfDevice))
+                {
+                    DeviceFound?.Invoke(selfDevice);
+                }
 
+                ScanProgressChanged?.Invoke(10);
+
+                // 3. Instant Phase: Read Windows Kernel ARP Cache (< 5ms)
+                // This instantly brings in active devices already on the network without any blocking!
+                try
+                {
+                    var kernelCache = NetworkAdapterService.GetKernelArpCache();
+                    foreach (var kvp in kernelCache)
+                    {
+                        var ip = kvp.Key;
+                        var mac = kvp.Value;
+                        if (ip.Equals(adapter.IpAddress) || (adapter.GatewayIp != null && ip.Equals(adapter.GatewayIp)))
+                            continue;
+
+                        string macStr = mac.ToString();
+                        if (!discoveredDevices.ContainsKey(macStr))
+                        {
+                            var device = new NetworkDevice
+                            {
+                                IP = ip,
+                                MAC = mac,
+                                Vendor = MacVendorService.GetVendor(mac),
+                                Hostname = "Resolving..."
+                            };
+
+                            if (discoveredDevices.TryAdd(macStr, device))
+                            {
+                                DeviceFound?.Invoke(device);
+                                QueueHostnameResolution(device, token);
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                ScanProgressChanged?.Invoke(30);
+
+                // 4. Subnet Sweep Phase
+                var ips = adapter.GetSubnetIps();
+                if (ips.Count == 0 || token.IsCancellationRequested)
+                {
+                    ScanProgressChanged?.Invoke(100);
+                    return;
+                }
+
+                // Fast broadcast ARP pings using raw socket/SharpPcap if opened
+                if (adapter.PcapDevice != null)
+                {
+                    try
+                    {
+                        var broadcastMac = PhysicalAddress.Parse("FF-FF-FF-FF-FF-FF");
+                        var zeroMac = PhysicalAddress.Parse("00-00-00-00-00-00");
+
+                        foreach (var ip in ips)
+                        {
+                            if (token.IsCancellationRequested) break;
+                            if (ip.Equals(adapter.IpAddress)) continue;
+
+                            var arp = new ArpPacket(
+                                ArpOperation.Request,
+                                zeroMac,
+                                ip,
+                                adapter.MacAddress,
+                                adapter.IpAddress
+                            );
+                            var eth = new EthernetPacket(
+                                adapter.MacAddress,
+                                broadcastMac,
+                                EthernetType.Arp
+                            )
+                            {
+                                PayloadPacket = arp
+                            };
+
+                            try
+                            {
+                                adapter.PcapDevice.SendPacket(eth.Bytes);
+                            }
+                            catch { }
+
+                            // Small delay between pings to prevent packet queue saturation
+                            await Task.Delay(2, token);
+                        }
+                    }
+                    catch { }
+                }
+
+                ScanProgressChanged?.Invoke(60);
+
+                // 5. Gentle background verification with controlled low concurrency (6 workers max)
+                // This prevents ThreadPool exhaustion and keeps UI 100% responsive
                 int total = ips.Count;
                 int processed = 0;
-                var discoveredDevices = new ConcurrentDictionary<string, NetworkDevice>(StringComparer.OrdinalIgnoreCase);
-
-                using var semaphore = new SemaphoreSlim(32); // 32 concurrent ARP probes
+                using var semaphore = new SemaphoreSlim(6);
 
                 var tasks = ips.Select(async ip =>
                 {
@@ -79,9 +173,15 @@ namespace SelfishNetModern.Services
                     {
                         if (token.IsCancellationRequested) return;
 
-                        // Skip self and gateway if already handled
                         if (ip.Equals(adapter.IpAddress) || (adapter.GatewayIp != null && ip.Equals(adapter.GatewayIp)))
                             return;
+
+                        // Check if already discovered
+                        if (discoveredDevices.Values.Any(d => d.IP.Equals(ip)))
+                            return;
+
+                        // Non-blocking yield
+                        await Task.Yield();
 
                         var mac = NetworkAdapterService.ResolveMac(ip, adapter.IpAddress);
                         if (mac != null && !mac.Equals(PhysicalAddress.None))
@@ -98,49 +198,54 @@ namespace SelfishNetModern.Services
                             if (discoveredDevices.TryAdd(macStr, device))
                             {
                                 DeviceFound?.Invoke(device);
-
-                                // Asynchronously resolve hostname
-                                _ = Task.Run(async () =>
-                                {
-                                    try
-                                    {
-                                        string name = await DeviceNameResolver.ResolveAsync(device.IP, token);
-                                        if (!string.IsNullOrWhiteSpace(name) && name != "Unknown")
-                                        {
-                                            device.Hostname = name;
-                                        }
-                                        else
-                                        {
-                                            device.Hostname = device.Vendor != "Unknown" ? $"{device.Vendor} Device" : "Host";
-                                        }
-                                    }
-                                    catch
-                                    {
-                                        device.Hostname = "Host";
-                                    }
-                                }, token);
+                                QueueHostnameResolution(device, token);
                             }
                         }
                     }
                     finally
                     {
                         int done = Interlocked.Increment(ref processed);
-                        ScanProgressChanged?.Invoke((int)((done / (double)total) * 100));
+                        int progress = 60 + (int)((done / (double)total) * 40);
+                        ScanProgressChanged?.Invoke(Math.Min(100, progress));
                         semaphore.Release();
                     }
                 }).ToList();
 
                 await Task.WhenAll(tasks);
+                ScanProgressChanged?.Invoke(100);
             }
             catch (OperationCanceledException)
             {
-                // Scan canceled
+                // Canceled cleanly
             }
             finally
             {
                 IsScanning = false;
                 ScanCompleted?.Invoke();
             }
+        }
+
+        private void QueueHostnameResolution(NetworkDevice device, CancellationToken token)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    string name = await DeviceNameResolver.ResolveAsync(device.IP, token);
+                    if (!string.IsNullOrWhiteSpace(name) && name != "Unknown")
+                    {
+                        device.Hostname = name;
+                    }
+                    else
+                    {
+                        device.Hostname = device.Vendor != "Unknown" ? $"{device.Vendor} Device" : "Host";
+                    }
+                }
+                catch
+                {
+                    device.Hostname = "Host";
+                }
+            }, token);
         }
 
         public void StopScan()

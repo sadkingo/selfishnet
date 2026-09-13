@@ -151,8 +151,8 @@ namespace SelfishNetModern.ViewModels
 
             // Wire scanner events
             _scanner.DeviceFound += OnDeviceFound;
-            _scanner.ScanProgressChanged += p => _dispatcher.Invoke(() => ScanProgress = p);
-            _scanner.ScanCompleted += () => _dispatcher.Invoke(() =>
+            _scanner.ScanProgressChanged += p => _dispatcher.BeginInvoke(DispatcherPriority.Background, () => ScanProgress = p);
+            _scanner.ScanCompleted += () => _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
             {
                 IsScanning = false;
                 StatusMessage = $"Scan completed. Found {Devices.Count} active device(s).";
@@ -165,7 +165,7 @@ namespace SelfishNetModern.ViewModels
             _controller.LogMessage += msg => AddLog($"[Traffic] {msg}");
             _controller.TotalSpeedUpdated += (dl, ul) =>
             {
-                _dispatcher.Invoke(() =>
+                _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
                 {
                     TotalDownloadKbps = dl;
                     TotalUploadKbps = ul;
@@ -175,7 +175,7 @@ namespace SelfishNetModern.ViewModels
             // Wire resilience events
             _resilience.ResilienceStateChanged += (msg, healthy) =>
             {
-                _dispatcher.Invoke(() =>
+                _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
                 {
                     StatusMessage = msg;
                     IsHealthy = healthy;
@@ -185,7 +185,7 @@ namespace SelfishNetModern.ViewModels
 
             _resilience.AdapterRecovered += recoveredAdapter =>
             {
-                _dispatcher.Invoke(() =>
+                _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
                 {
                     SelectedAdapter = recoveredAdapter;
                     AddLog($"[Resilience] Adapter recovered: {recoveredAdapter.IpAddress}");
@@ -240,7 +240,7 @@ namespace SelfishNetModern.ViewModels
 
         private void ExecuteScan()
         {
-            if (SelectedAdapter == null) return;
+            if (SelectedAdapter == null || IsScanning) return;
 
             Devices.Clear();
             IsScanning = true;
@@ -248,12 +248,27 @@ namespace SelfishNetModern.ViewModels
             StatusMessage = "Scanning local subnet for active devices...";
             AddLog("Started ARP subnet discovery...");
 
-            _ = _scanner.StartScanAsync(SelectedAdapter);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _scanner.StartScanAsync(SelectedAdapter);
+                }
+                catch (Exception ex)
+                {
+                    _ = _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+                    {
+                        StatusMessage = $"Scan error: {ex.Message}";
+                        AddLog($"Scan error: {ex.Message}");
+                        IsScanning = false;
+                    });
+                }
+            });
         }
 
         private void OnDeviceFound(NetworkDevice device)
         {
-            _dispatcher.Invoke(() =>
+            _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
             {
                 var existing = Devices.FirstOrDefault(d => d.MacString.Equals(device.MacString, StringComparison.OrdinalIgnoreCase) ||
                                                            d.IP.Equals(device.IP));
@@ -413,7 +428,7 @@ namespace SelfishNetModern.ViewModels
 
         public void AddLog(string message)
         {
-            _dispatcher.Invoke(() =>
+            _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
             {
                 string timestamp = DateTime.Now.ToString("HH:mm:ss");
                 EventLogs.Insert(0, $"[{timestamp}] {message}");

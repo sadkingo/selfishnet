@@ -15,35 +15,15 @@ namespace SelfishNetModern.Services
             if (ip == null || ip.Equals(IPAddress.None))
                 return "Unknown";
 
-            // 1. Try NetBIOS Name Query (Fastest and most accurate for Windows, Samba, NAS, and many IoT devices)
+            // 1. Fast NetBIOS Name Query (Fastest, non-blocking UDP, highly accurate for LAN)
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(400); // 400ms timeout for NetBIOS
+                cts.CancelAfter(250); // 250ms max for NetBIOS
                 string netbiosName = await QueryNetBiosNameAsync(ip, cts.Token);
                 if (!string.IsNullOrWhiteSpace(netbiosName))
                 {
                     return netbiosName;
-                }
-            }
-            catch
-            {
-                // Fallthrough to DNS
-            }
-
-            // 2. Try Reverse DNS
-            try
-            {
-                var hostTask = Dns.GetHostEntryAsync(ip);
-                if (await Task.WhenAny(hostTask, Task.Delay(400, cancellationToken)) == hostTask)
-                {
-                    var hostEntry = await hostTask;
-                    if (!string.IsNullOrWhiteSpace(hostEntry.HostName))
-                    {
-                        // Clean domain if it's like mypc.lan or mypc.home
-                        var parts = hostEntry.HostName.Split('.');
-                        return parts.Length > 0 ? parts[0] : hostEntry.HostName;
-                    }
                 }
             }
             catch
