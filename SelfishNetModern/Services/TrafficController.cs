@@ -22,6 +22,7 @@ namespace SelfishNetModern.Services
         private Timer? _speedMeterTimer;
         private long _lastSpeedMeterTick;
 
+        public NetworkDevice? SelfDevice { get; set; }
         public bool IsCapturing { get; private set; }
         public double TotalDownloadKbps { get; private set; }
         public double TotalUploadKbps { get; private set; }
@@ -36,7 +37,12 @@ namespace SelfishNetModern.Services
 
         public void RegisterDevice(NetworkDevice device)
         {
-            if (device.IsGateway || device.IsSelf) return;
+            if (device.IsSelf)
+            {
+                SelfDevice = device;
+                return;
+            }
+            if (device.IsGateway) return;
             if (!NetworkAdapterService.IsValidUnicastHost(device.IP, device.MAC, _adapter)) return;
 
             _controlledDevices[device.IP.ToString()] = device;
@@ -62,6 +68,16 @@ namespace SelfishNetModern.Services
 
         public void UnregisterDevice(NetworkDevice device)
         {
+            if (device.IsSelf)
+            {
+                if (ReferenceEquals(SelfDevice, device))
+                {
+                    SelfDevice = null;
+                }
+                device.CurrentDownloadKbps = 0;
+                device.CurrentUploadKbps = 0;
+                return;
+            }
             _controlledDevices.TryRemove(device.IP.ToString(), out _);
             _controlledDevices.TryRemove(device.MacString, out _);
             _limiters.TryRemove(device.MacString, out _);
@@ -116,6 +132,12 @@ namespace SelfishNetModern.Services
                 TotalUploadKbps = 0;
                 TotalSpeedUpdated?.Invoke(0, 0);
 
+                if (SelfDevice != null)
+                {
+                    SelfDevice.CurrentDownloadKbps = 0;
+                    SelfDevice.CurrentUploadKbps = 0;
+                }
+
                 foreach (var dev in _controlledDevices.Values)
                 {
                     dev.CurrentDownloadKbps = 0;
@@ -142,94 +164,114 @@ namespace SelfishNetModern.Services
                 var srcMac = ethernetPacket.SourceHardwareAddress;
                 var dstMac = ethernetPacket.DestinationHardwareAddress;
 
-                // Only inspect frames destined for our MAC (promiscuous MITM capture)
-                if (!dstMac.Equals(_adapter.MacAddress)) return;
-
                 // Ignore multicast / broadcast frames
                 byte[] dstMacBytes = dstMac.GetAddressBytes();
                 byte[] srcMacBytes = srcMac.GetAddressBytes();
                 if (dstMacBytes.Length > 0 && (dstMacBytes[0] & 0x01) != 0) return;
                 if (srcMacBytes.Length > 0 && (srcMacBytes[0] & 0x01) != 0) return;
 
-                var ipPacket = ethernetPacket.PayloadPacket as IPv4Packet;
-                if (ipPacket == null) return;
-
-                var srcIp = ipPacket.SourceAddress;
-                var dstIp = ipPacket.DestinationAddress;
-
-                // Ignore multicast (224.0.0.0/4), broadcast, or reserved/loopback IPs
-                byte[] dstIpBytes = dstIp.GetAddressBytes();
-                byte[] srcIpBytes = srcIp.GetAddressBytes();
-                if (dstIpBytes.Length == 4 && (dstIpBytes[0] >= 224 || dstIpBytes[0] == 0 || dstIpBytes[0] == 127))
-                    return;
-                if (srcIpBytes.Length == 4 && (srcIpBytes[0] >= 224 || srcIpBytes[0] == 0 || srcIpBytes[0] == 127))
-                    return;
-
-                // Ignore packets genuinely destined for or originating from our own PC IP
-                if (dstIp.Equals(_adapter.IpAddress) || srcIp.Equals(_adapter.IpAddress))
-                    return;
-
-                // Case 1: Downlink (Gateway -> Target Device)
-                // Traffic coming from Gateway destined for one of our controlled devices
-                if (_controlledDevices.TryGetValue(dstIp.ToString(), out var targetDevice) && targetDevice.IsControlled)
+                if (ethernetPacket.PayloadPacket is IPv4Packet ipPacket)
                 {
-                    targetDevice.LastSeen = DateTime.Now;
+                    var srcIp = ipPacket.SourceAddress;
+                    var dstIp = ipPacket.DestinationAddress;
 
-                    // If blocked, drop immediately
-                    if (targetDevice.IsBlocked) return;
+                    // Ignore multicast (224.0.0.0/4), broadcast, or reserved/loopback IPs
+                    byte[] dstIpBytes = dstIp.GetAddressBytes();
+                    byte[] srcIpBytes = srcIp.GetAddressBytes();
+                    if (dstIpBytes.Length == 4 && (dstIpBytes[0] >= 224 || dstIpBytes[0] == 0 || dstIpBytes[0] == 127))
+                        return;
+                    if (srcIpBytes.Length == 4 && (srcIpBytes[0] >= 224 || srcIpBytes[0] == 0 || srcIpBytes[0] == 127))
+                        return;
 
-                    // Bandwidth Limiter Check
-                    if (_limiters.TryGetValue(targetDevice.MacString, out var limiters))
+                    // 1. Host PC Traffic (Download & Upload)
+                    if (_adapter.MatchesLocalIp(dstIp))
                     {
-                        if (!limiters.dl.AllowPacket(rawBytes.Length))
-                        {
-                            return; // Dropped due to rate limit!
-                        }
+                        RecordBytes("SELF", rawBytes.Length, 0);
+                        return;
+                    }
+                    if (_adapter.MatchesLocalIp(srcIp) && srcMac.Equals(_adapter.MacAddress))
+                    {
+                        RecordBytes("SELF", 0, rawBytes.Length);
+                        return;
                     }
 
-                    // Record download bytes
-                    RecordBytes(targetDevice.MacString, rawBytes.Length, 0);
+                    // 2. MITM Traffic for controlled target devices (must be addressed to our MAC)
+                    if (!dstMac.Equals(_adapter.MacAddress)) return;
 
-                    // Forward to real target device
-                    // Rewrite Destination MAC to Target's real MAC
-                    // Rewrite Source MAC to Our MAC
-                    ethernetPacket.DestinationHardwareAddress = targetDevice.MAC;
-                    ethernetPacket.SourceHardwareAddress = _adapter.MacAddress;
+                    // Case 1: Downlink (Gateway -> Target Device)
+                    // Traffic coming from Gateway destined for one of our controlled devices
+                    if (_controlledDevices.TryGetValue(dstIp.ToString(), out var targetDevice) && targetDevice.IsControlled)
+                    {
+                        targetDevice.LastSeen = DateTime.Now;
 
-                    _adapter.NativeDevice?.SendPacket(ethernetPacket.Bytes);
-                    return;
+                        // If blocked, drop immediately
+                        if (targetDevice.IsBlocked) return;
+
+                        // Bandwidth Limiter Check
+                        if (_limiters.TryGetValue(targetDevice.MacString, out var limiters))
+                        {
+                            if (!limiters.dl.AllowPacket(rawBytes.Length))
+                            {
+                                return; // Dropped due to rate limit!
+                            }
+                        }
+
+                        // Record download bytes
+                        RecordBytes(targetDevice.MacString, rawBytes.Length, 0);
+
+                        // Forward to real target device
+                        ethernetPacket.DestinationHardwareAddress = targetDevice.MAC;
+                        ethernetPacket.SourceHardwareAddress = _adapter.MacAddress;
+
+                        _adapter.NativeDevice?.SendPacket(ethernetPacket.Bytes);
+                        return;
+                    }
+
+                    // Case 2: Uplink (Target Device -> Gateway / Internet)
+                    // Traffic coming from a controlled target device destined for outside
+                    string srcMacStr = string.Join(":", srcMac.GetAddressBytes().Select(b => b.ToString("X2")));
+                    if ((_controlledDevices.TryGetValue(srcIp.ToString(), out var srcDevice) ||
+                         _controlledDevices.TryGetValue(srcMacStr, out srcDevice)) && srcDevice.IsControlled)
+                    {
+                        srcDevice.LastSeen = DateTime.Now;
+
+                        // If blocked, drop immediately
+                        if (srcDevice.IsBlocked) return;
+
+                        // Bandwidth Limiter Check
+                        if (_limiters.TryGetValue(srcDevice.MacString, out var limiters))
+                        {
+                            if (!limiters.ul.AllowPacket(rawBytes.Length))
+                            {
+                                return; // Dropped due to rate limit!
+                            }
+                        }
+
+                        // Record upload bytes
+                        RecordBytes(srcDevice.MacString, 0, rawBytes.Length);
+
+                        // Forward to Gateway
+                        ethernetPacket.DestinationHardwareAddress = _adapter.GatewayMac;
+                        ethernetPacket.SourceHardwareAddress = _adapter.MacAddress;
+
+                        _adapter.NativeDevice?.SendPacket(ethernetPacket.Bytes);
+                    }
                 }
-
-                // Case 2: Uplink (Target Device -> Gateway / Internet)
-                // Traffic coming from a controlled target device destined for outside
-                string srcMacStr = string.Join(":", srcMac.GetAddressBytes().Select(b => b.ToString("X2")));
-                if ((_controlledDevices.TryGetValue(srcIp.ToString(), out var srcDevice) ||
-                     _controlledDevices.TryGetValue(srcMacStr, out srcDevice)) && srcDevice.IsControlled)
+                else if (ethernetPacket.PayloadPacket is IPv6Packet ip6Packet)
                 {
-                    srcDevice.LastSeen = DateTime.Now;
+                    var srcIp = ip6Packet.SourceAddress;
+                    var dstIp = ip6Packet.DestinationAddress;
 
-                    // If blocked, drop immediately
-                    if (srcDevice.IsBlocked) return;
-
-                    // Bandwidth Limiter Check
-                    if (_limiters.TryGetValue(srcDevice.MacString, out var limiters))
+                    if (_adapter.MatchesLocalIp(dstIp))
                     {
-                        if (!limiters.ul.AllowPacket(rawBytes.Length))
-                        {
-                            return; // Dropped due to rate limit!
-                        }
+                        RecordBytes("SELF", rawBytes.Length, 0);
+                        return;
                     }
-
-                    // Record upload bytes
-                    RecordBytes(srcDevice.MacString, 0, rawBytes.Length);
-
-                    // Forward to Gateway
-                    // Rewrite Destination MAC to Gateway MAC
-                    // Rewrite Source MAC to Our MAC
-                    ethernetPacket.DestinationHardwareAddress = _adapter.GatewayMac;
-                    ethernetPacket.SourceHardwareAddress = _adapter.MacAddress;
-
-                    _adapter.NativeDevice?.SendPacket(ethernetPacket.Bytes);
+                    if (_adapter.MatchesLocalIp(srcIp) && srcMac.Equals(_adapter.MacAddress))
+                    {
+                        RecordBytes("SELF", 0, rawBytes.Length);
+                        return;
+                    }
                 }
             }
             catch
@@ -255,6 +297,28 @@ namespace SelfishNetModern.Services
             double totalDl = 0;
             double totalUl = 0;
 
+            // 1. Host PC speed
+            if (SelfDevice != null)
+            {
+                if (_intervalBytes.TryRemove("SELF", out var selfBytes))
+                {
+                    double dlKbps = (selfBytes.dlBytes / 1024.0) / elapsedSec;
+                    double ulKbps = (selfBytes.ulBytes / 1024.0) / elapsedSec;
+
+                    SelfDevice.CurrentDownloadKbps = dlKbps;
+                    SelfDevice.CurrentUploadKbps = ulKbps;
+
+                    totalDl += dlKbps;
+                    totalUl += ulKbps;
+                }
+                else
+                {
+                    SelfDevice.CurrentDownloadKbps = 0;
+                    SelfDevice.CurrentUploadKbps = 0;
+                }
+            }
+
+            // 2. Controlled Devices speed
             // Use distinct devices to avoid double-counting due to IP & MAC dictionary keys
             foreach (var device in _controlledDevices.Values.Distinct())
             {

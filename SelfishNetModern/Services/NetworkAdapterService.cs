@@ -189,6 +189,11 @@ namespace SelfishNetModern.Services
                     adapterInfo.GatewayMac = ResolveMac(adapterInfo.GatewayIp, adapterInfo.IpAddress);
                 }
 
+                foreach (var u in ipProps.UnicastAddresses)
+                {
+                    adapterInfo.LocalIps.Add(u.Address);
+                }
+
                 adapters.Add(adapterInfo);
             }
 

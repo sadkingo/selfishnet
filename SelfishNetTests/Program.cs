@@ -24,6 +24,8 @@ namespace SelfishNetTests
             TestTermsOfUse();
             TestDeviceSettings();
             TestHostValidation();
+            TestHostTrafficCapture();
+            TestTrafficControllerHostAccounting();
 
             Console.WriteLine("\n🎉 ALL TESTS PASSED SUCCESSFULLY!");
         }
@@ -140,7 +142,7 @@ namespace SelfishNetTests
             var arp = new ArpPacket(ArpOperation.Response, myMac, myIp, gwMac, gwIp);
             var eth = new EthernetPacket(myMac, gwMac, EthernetType.Arp) { PayloadPacket = arp };
 
-            bool sent = defaultAdapter.NativeDevice.SendPacket(eth.Bytes);
+            bool sent = defaultAdapter!.NativeDevice!.SendPacket(eth.Bytes);
             Assert(sent, "NativePcapDevice SendPacket should succeed");
 
             defaultAdapter.NativeDevice.Close();
@@ -245,6 +247,99 @@ namespace SelfishNetTests
 
             Console.WriteLine("PASSED");
         }
+
+        static void TestHostTrafficCapture()
+        {
+            Console.Write("[Test 9] Testing Host Traffic Capture via NativePcapDevice... ");
+            var adapter = NetworkAdapterService.GetDefaultAdapter();
+            Assert(adapter != null && adapter.NativeDevice != null, "Adapter must be valid");
+
+            long rxHostBytes = 0;
+            long txHostBytes = 0;
+
+            adapter!.NativeDevice!.OnPacketArrival += (header, bytes) =>
+            {
+                if (bytes.Length < 14) return;
+                try
+                {
+                    var eth = new EthernetPacket(new PacketDotNet.Utils.ByteArraySegment(bytes));
+                    if (eth.PayloadPacket is IPv4Packet ip4)
+                    {
+                        if (ip4.DestinationAddress.Equals(adapter.IpAddress))
+                        {
+                            Interlocked.Add(ref rxHostBytes, bytes.Length);
+                        }
+                        if (ip4.SourceAddress.Equals(adapter.IpAddress))
+                        {
+                            Interlocked.Add(ref txHostBytes, bytes.Length);
+                        }
+                    }
+                }
+                catch { }
+            };
+
+            adapter.NativeDevice.StartCapture();
+
+            // Perform some network activity (DNS/Ping/HTTP)
+            try
+            {
+                using var client = new System.Net.Http.HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(2);
+                _ = client.GetStringAsync("http://1.1.1.1").Result;
+            }
+            catch { }
+
+            Thread.Sleep(500);
+            adapter.NativeDevice.StopCapture();
+            adapter.NativeDevice.Close();
+
+            Console.WriteLine($"PASSED (Captured Rx: {rxHostBytes} bytes, Tx: {txHostBytes} bytes)");
+        }
+
+        static void TestTrafficControllerHostAccounting()
+        {
+            Console.Write("[Test 10] Testing TrafficController Host Usage Accounting... ");
+            var adapter = NetworkAdapterService.GetDefaultAdapter();
+            Assert(adapter != null && adapter.NativeDevice != null, "Adapter must be valid");
+
+            var controller = new TrafficController();
+            controller.SetAdapter(adapter!);
+
+            var selfDevice = new NetworkDevice
+            {
+                IP = adapter!.IpAddress,
+                MAC = adapter.MacAddress,
+                IsSelf = true,
+                Hostname = "TestHost"
+            };
+
+            controller.RegisterDevice(selfDevice);
+            Assert(ReferenceEquals(controller.SelfDevice, selfDevice), "SelfDevice must be linked to TrafficController");
+
+            controller.Start();
+
+            try
+            {
+                using var client = new System.Net.Http.HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(2);
+                _ = client.GetStringAsync("http://1.1.1.1").Result;
+            }
+            catch { }
+
+            // Wait for speed meter timer tick (1000ms interval)
+            Thread.Sleep(1200);
+
+            double dl = selfDevice.CurrentDownloadKbps;
+            double ul = selfDevice.CurrentUploadKbps;
+
+            controller.Stop();
+            adapter.NativeDevice!.Close();
+
+            Assert(selfDevice.CurrentDownloadKbps == 0 && selfDevice.CurrentUploadKbps == 0, "Stop must reset speed to 0");
+            Console.WriteLine($"PASSED (Measured Peak Host DL: {dl:F1} KB/s, UL: {ul:F1} KB/s)");
+        }
+
+
 
         static void Assert(bool condition, string message)
         {

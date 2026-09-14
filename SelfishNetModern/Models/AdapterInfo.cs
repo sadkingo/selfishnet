@@ -17,6 +17,14 @@ namespace SelfishNetModern.Models
         public PhysicalAddress? GatewayMac { get; set; }
         public ILiveDevice? PcapDevice { get; set; }
         public SelfishNetModern.Services.NativePcapDevice? NativeDevice { get; set; }
+        public HashSet<IPAddress> LocalIps { get; } = new();
+
+        public bool MatchesLocalIp(IPAddress? ip)
+        {
+            if (ip == null) return false;
+            if (ip.Equals(IpAddress)) return true;
+            return LocalIps.Contains(ip);
+        }
 
         public string DisplayName => $"{Name} ({IpAddress}) - {Description}";
 

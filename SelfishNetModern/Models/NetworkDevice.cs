@@ -147,17 +147,38 @@ namespace SelfishNetModern.Models
         public double CurrentDownloadKbps
         {
             get => _currentDownloadKbps;
-            set { if (Math.Abs(_currentDownloadKbps - value) > 0.1) { _currentDownloadKbps = value; OnPropertyChanged(); OnPropertyChanged(nameof(DownloadSpeedDisplay)); } }
+            set 
+            { 
+                if (Math.Abs(_currentDownloadKbps - value) > 0.01 || (value == 0 && _currentDownloadKbps != 0)) 
+                { 
+                    _currentDownloadKbps = value; 
+                    OnPropertyChanged(); 
+                    OnPropertyChanged(nameof(DownloadSpeedDisplay)); 
+                } 
+            }
         }
 
         public double CurrentUploadKbps
         {
             get => _currentUploadKbps;
-            set { if (Math.Abs(_currentUploadKbps - value) > 0.1) { _currentUploadKbps = value; OnPropertyChanged(); OnPropertyChanged(nameof(UploadSpeedDisplay)); } }
+            set 
+            { 
+                if (Math.Abs(_currentUploadKbps - value) > 0.01 || (value == 0 && _currentUploadKbps != 0)) 
+                { 
+                    _currentUploadKbps = value; 
+                    OnPropertyChanged(); 
+                    OnPropertyChanged(nameof(UploadSpeedDisplay)); 
+                } 
+            }
         }
 
-        public string DownloadSpeedDisplay => $"{_currentDownloadKbps:F1} KB/s";
-        public string UploadSpeedDisplay => $"{_currentUploadKbps:F1} KB/s";
+        public string DownloadSpeedDisplay => _currentDownloadKbps >= 1024 
+            ? $"{(_currentDownloadKbps / 1024.0):F2} MB/s" 
+            : $"{_currentDownloadKbps:F1} KB/s";
+
+        public string UploadSpeedDisplay => _currentUploadKbps >= 1024 
+            ? $"{(_currentUploadKbps / 1024.0):F2} MB/s" 
+            : $"{_currentUploadKbps:F1} KB/s";
 
         public DateTime LastSeen
         {

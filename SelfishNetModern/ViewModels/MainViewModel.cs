@@ -242,8 +242,58 @@ namespace SelfishNetModern.ViewModels
                 _controller.SetAdapter(SelectedAdapter);
                 _resilience.Start(SelectedAdapter);
 
+                EnsureDefaultDevices(SelectedAdapter);
+
                 AddLog($"Selected interface: {SelectedAdapter.Name} ({SelectedAdapter.IpAddress})");
             }
+        }
+
+        private void EnsureDefaultDevices(AdapterInfo adapter)
+        {
+            // 1. Default Gateway (Router)
+            if (adapter.GatewayIp != null)
+            {
+                var existingGw = Devices.FirstOrDefault(d => d.IsGateway || d.IP.Equals(adapter.GatewayIp));
+                if (existingGw == null)
+                {
+                    var gwMac = adapter.GatewayMac ?? NetworkAdapterService.ResolveMac(adapter.GatewayIp, adapter.IpAddress);
+                    if (gwMac != null)
+                    {
+                        var gwDevice = new NetworkDevice
+                        {
+                            IP = adapter.GatewayIp,
+                            MAC = gwMac,
+                            IsGateway = true,
+                            Vendor = MacVendorService.GetVendor(gwMac),
+                            Hostname = "Default Gateway (Router)"
+                        };
+                        Devices.Insert(0, gwDevice);
+                    }
+                }
+            }
+
+            // 2. Your Computer (Host)
+            var existingSelf = Devices.FirstOrDefault(d => d.IsSelf || d.IP.Equals(adapter.IpAddress));
+            if (existingSelf == null)
+            {
+                var selfDevice = new NetworkDevice
+                {
+                    IP = adapter.IpAddress,
+                    MAC = adapter.MacAddress,
+                    IsSelf = true,
+                    Vendor = MacVendorService.GetVendor(adapter.MacAddress),
+                    Hostname = Environment.MachineName
+                };
+                int insertIdx = Devices.Any(d => d.IsGateway) ? 1 : 0;
+                Devices.Insert(insertIdx, selfDevice);
+                _controller.SelfDevice = selfDevice;
+            }
+            else
+            {
+                _controller.SelfDevice = existingSelf;
+            }
+
+            UpdateDeviceCounts();
         }
 
         private void ExecuteScan()
@@ -254,6 +304,7 @@ namespace SelfishNetModern.ViewModels
             if (!IsRedirecting)
             {
                 Devices.Clear();
+                EnsureDefaultDevices(SelectedAdapter);
             }
 
             IsScanning = true;
@@ -296,6 +347,11 @@ namespace SelfishNetModern.ViewModels
                     if (string.IsNullOrEmpty(existing.Vendor) && !string.IsNullOrEmpty(device.Vendor))
                         existing.Vendor = device.Vendor;
                     existing.LastSeen = DateTime.Now;
+
+                    if (existing.IsSelf)
+                    {
+                        _controller.SelfDevice = existing;
+                    }
 
                     // If redirecting is currently active, ensure this device is controlled and in the spoofer & controller
                     if (IsRedirecting && !existing.IsGateway && !existing.IsSelf)
@@ -372,6 +428,11 @@ namespace SelfishNetModern.ViewModels
 
                 Devices.Add(device);
 
+                if (device.IsSelf)
+                {
+                    _controller.SelfDevice = device;
+                }
+
                 // If redirection is currently active, immediately auto-redirect this new device!
                 if (IsRedirecting && device.IsControlled && !device.IsGateway && !device.IsSelf)
                 {
@@ -410,6 +471,13 @@ namespace SelfishNetModern.ViewModels
                 _spoofer.AddControlledDevice(dev);
                 _controller.RegisterDevice(dev);
                 controlledCount++;
+            }
+
+            // Link Host PC (Self) device to controller
+            var selfDevice = Devices.FirstOrDefault(d => d.IsSelf);
+            if (selfDevice != null)
+            {
+                _controller.SelfDevice = selfDevice;
             }
 
             StatusMessage = controlledCount > 0 
