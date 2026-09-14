@@ -37,6 +37,7 @@ namespace SelfishNetModern.Services
         public void RegisterDevice(NetworkDevice device)
         {
             if (device.IsGateway || device.IsSelf) return;
+            if (!NetworkAdapterService.IsValidUnicastHost(device.IP, device.MAC, _adapter)) return;
 
             _controlledDevices[device.IP.ToString()] = device;
             _controlledDevices[device.MacString] = device;
@@ -144,11 +145,25 @@ namespace SelfishNetModern.Services
                 // Only inspect frames destined for our MAC (promiscuous MITM capture)
                 if (!dstMac.Equals(_adapter.MacAddress)) return;
 
+                // Ignore multicast / broadcast frames
+                byte[] dstMacBytes = dstMac.GetAddressBytes();
+                byte[] srcMacBytes = srcMac.GetAddressBytes();
+                if (dstMacBytes.Length > 0 && (dstMacBytes[0] & 0x01) != 0) return;
+                if (srcMacBytes.Length > 0 && (srcMacBytes[0] & 0x01) != 0) return;
+
                 var ipPacket = ethernetPacket.PayloadPacket as IPv4Packet;
                 if (ipPacket == null) return;
 
                 var srcIp = ipPacket.SourceAddress;
                 var dstIp = ipPacket.DestinationAddress;
+
+                // Ignore multicast (224.0.0.0/4), broadcast, or reserved/loopback IPs
+                byte[] dstIpBytes = dstIp.GetAddressBytes();
+                byte[] srcIpBytes = srcIp.GetAddressBytes();
+                if (dstIpBytes.Length == 4 && (dstIpBytes[0] >= 224 || dstIpBytes[0] == 0 || dstIpBytes[0] == 127))
+                    return;
+                if (srcIpBytes.Length == 4 && (srcIpBytes[0] >= 224 || srcIpBytes[0] == 0 || srcIpBytes[0] == 127))
+                    return;
 
                 // Ignore packets genuinely destined for or originating from our own PC IP
                 if (dstIp.Equals(_adapter.IpAddress) || srcIp.Equals(_adapter.IpAddress))

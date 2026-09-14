@@ -23,6 +23,7 @@ namespace SelfishNetTests
             TestNativePcapDevice();
             TestTermsOfUse();
             TestDeviceSettings();
+            TestHostValidation();
 
             Console.WriteLine("\n🎉 ALL TESTS PASSED SUCCESSFULLY!");
         }
@@ -201,6 +202,48 @@ namespace SelfishNetTests
             {
                 if (System.IO.File.Exists(tempFile)) System.IO.File.Delete(tempFile);
             }
+        }
+
+        static void TestHostValidation()
+        {
+            Console.Write("[Test 8] Testing IsValidUnicastHost filtering (multicast/broadcast/subnet)... ");
+
+            var adapter = new AdapterInfo
+            {
+                IpAddress = IPAddress.Parse("192.168.1.50"),
+                SubnetMask = IPAddress.Parse("255.255.255.0")
+            };
+
+            var validMac = PhysicalAddress.Parse("00-11-22-33-44-55");
+            var multicastMac = PhysicalAddress.Parse("01-00-5E-00-00-16");
+            var broadcastMac = PhysicalAddress.Parse("FF-FF-FF-FF-FF-FF");
+            var zeroMac = PhysicalAddress.Parse("00-00-00-00-00-00");
+
+            var validIp = IPAddress.Parse("192.168.1.33");
+            var multicastIp1 = IPAddress.Parse("224.0.0.22");
+            var multicastIp2 = IPAddress.Parse("224.0.0.251");
+            var multicastIp3 = IPAddress.Parse("239.255.255.250");
+            var broadcastIp = IPAddress.Parse("192.168.1.255");
+            var wrongSubnetIp = IPAddress.Parse("10.0.0.5");
+
+            // Valid host check
+            Assert(NetworkAdapterService.IsValidUnicastHost(validIp, validMac, adapter), "Valid host should pass");
+
+            // Multicast IP rejection
+            Assert(!NetworkAdapterService.IsValidUnicastHost(multicastIp1, validMac, adapter), "224.0.0.22 must be rejected");
+            Assert(!NetworkAdapterService.IsValidUnicastHost(multicastIp2, validMac, adapter), "224.0.0.251 must be rejected");
+            Assert(!NetworkAdapterService.IsValidUnicastHost(multicastIp3, validMac, adapter), "239.255.255.250 must be rejected");
+
+            // Multicast & Broadcast MAC rejection
+            Assert(!NetworkAdapterService.IsValidUnicastHost(validIp, multicastMac, adapter), "Multicast MAC 01:00:5E must be rejected");
+            Assert(!NetworkAdapterService.IsValidUnicastHost(validIp, broadcastMac, adapter), "Broadcast MAC must be rejected");
+            Assert(!NetworkAdapterService.IsValidUnicastHost(validIp, zeroMac, adapter), "Zero MAC must be rejected");
+
+            // Subnet mismatch & Subnet broadcast rejection
+            Assert(!NetworkAdapterService.IsValidUnicastHost(broadcastIp, validMac, adapter), "Subnet broadcast .255 must be rejected");
+            Assert(!NetworkAdapterService.IsValidUnicastHost(wrongSubnetIp, validMac, adapter), "Foreign subnet IP must be rejected");
+
+            Console.WriteLine("PASSED");
         }
 
         static void Assert(bool condition, string message)

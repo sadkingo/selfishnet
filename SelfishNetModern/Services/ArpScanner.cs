@@ -77,12 +77,15 @@ namespace SelfishNetModern.Services
                 // This instantly brings in active devices already on the network without any blocking!
                 try
                 {
-                    var kernelCache = NetworkAdapterService.GetKernelArpCache();
+                    var kernelCache = NetworkAdapterService.GetKernelArpCache(adapter);
                     foreach (var kvp in kernelCache)
                     {
                         var ip = kvp.Key;
                         var mac = kvp.Value;
                         if (ip.Equals(adapter.IpAddress) || (adapter.GatewayIp != null && ip.Equals(adapter.GatewayIp)))
+                            continue;
+
+                        if (!NetworkAdapterService.IsValidUnicastHost(ip, mac, adapter))
                             continue;
 
                         string macStr = mac.ToString();
@@ -184,7 +187,7 @@ namespace SelfishNetModern.Services
                         await Task.Yield();
 
                         var mac = NetworkAdapterService.ResolveMac(ip, adapter.IpAddress);
-                        if (mac != null && !mac.Equals(PhysicalAddress.None))
+                        if (mac != null && !mac.Equals(PhysicalAddress.None) && NetworkAdapterService.IsValidUnicastHost(ip, mac, adapter))
                         {
                             string macStr = mac.ToString();
                             var device = new NetworkDevice

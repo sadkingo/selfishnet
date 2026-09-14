@@ -29,7 +29,60 @@ namespace SelfishNetModern.Services
         [DllImport("iphlpapi.dll", SetLastError = true)]
         private static extern int GetIpNetTable(IntPtr pIpNetTable, ref int pdwSize, bool bOrder);
 
-        public static Dictionary<IPAddress, PhysicalAddress> GetKernelArpCache()
+        public static bool IsValidUnicastHost(IPAddress? ip, PhysicalAddress? mac, AdapterInfo? adapter = null)
+        {
+            if (ip == null || mac == null) return false;
+
+            // 1. MAC Validation
+            byte[] macBytes = mac.GetAddressBytes();
+            if (macBytes.Length != 6) return false;
+            // Disallow all 0s and all 0xFFs
+            if (macBytes.All(b => b == 0) || macBytes.All(b => b == 0xFF)) return false;
+            // Disallow Multicast / Broadcast MAC (IEEE 802 I/G bit: bit 0 of first octet is 1)
+            // e.g. 01:00:5E:... (IPv4 multicast), 33:33:... (IPv6 multicast), FF:FF:FF:... (broadcast)
+            if ((macBytes[0] & 0x01) != 0) return false;
+
+            // 2. IP Validation
+            if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
+            byte[] ipBytes = ip.GetAddressBytes();
+            if (ipBytes.Length != 4) return false;
+
+            // Reject 0.0.0.0/8, 127.0.0.0/8 (Loopback), 169.254.0.0/16 (APIPA)
+            if (ipBytes[0] == 0 || ipBytes[0] == 127) return false;
+            if (ipBytes[0] == 169 && ipBytes[1] == 254) return false;
+
+            // Reject Class D (Multicast 224.0.0.0 - 239.255.255.255) and Class E / Broadcast (>= 240.0.0.0)
+            if (ipBytes[0] >= 224) return false;
+
+            // 3. Adapter Subnet Validation (if provided)
+            if (adapter != null && adapter.SubnetMask != null && adapter.IpAddress != null)
+            {
+                byte[] maskBytes = adapter.SubnetMask.GetAddressBytes();
+                byte[] adapterIpBytes = adapter.IpAddress.GetAddressBytes();
+
+                for (int i = 0; i < 4; i++)
+                {
+                    if ((ipBytes[i] & maskBytes[i]) != (adapterIpBytes[i] & maskBytes[i]))
+                        return false;
+                }
+
+                // Check for network address (host bits all 0) and broadcast address (host bits all 1)
+                bool isNetworkAddr = true;
+                bool isBroadcastAddr = true;
+                for (int i = 0; i < 4; i++)
+                {
+                    byte hostBits = (byte)(ipBytes[i] & ~maskBytes[i]);
+                    byte maxHostBits = (byte)(~maskBytes[i] & 0xFF);
+                    if (hostBits != 0) isNetworkAddr = false;
+                    if (hostBits != maxHostBits) isBroadcastAddr = false;
+                }
+                if (isNetworkAddr || isBroadcastAddr) return false;
+            }
+
+            return true;
+        }
+
+        public static Dictionary<IPAddress, PhysicalAddress> GetKernelArpCache(AdapterInfo? adapter = null)
         {
             var result = new Dictionary<IPAddress, PhysicalAddress>();
             int bytesNeeded = 0;
@@ -56,9 +109,10 @@ namespace SelfishNetModern.Services
                             {
                                 byte[] macBytes = new byte[6];
                                 Array.Copy(row.bPhysAddr, macBytes, 6);
-                                if (!macBytes.All(b => b == 0) && !macBytes.All(b => b == 0xFF))
+                                var mac = new PhysicalAddress(macBytes);
+                                if (IsValidUnicastHost(ip, mac, adapter))
                                 {
-                                    result[ip] = new PhysicalAddress(macBytes);
+                                    result[ip] = mac;
                                 }
                             }
                         }

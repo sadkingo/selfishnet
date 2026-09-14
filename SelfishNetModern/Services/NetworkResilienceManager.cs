@@ -49,7 +49,16 @@ namespace SelfishNetModern.Services
 
         private async void OnNetworkAddressChanged(object? sender, EventArgs e)
         {
-            await HandleNetworkInstabilityAsync("Network address or IP configuration changed");
+            // Only trigger reconnect if our current adapter has actually lost its IP or disconnected
+            if (_adapter != null)
+            {
+                var available = NetworkAdapterService.GetAvailableAdapters();
+                bool stillActive = available.Any(a => a.Id == _adapter.Id && a.IpAddress.Equals(_adapter.IpAddress));
+                if (!stillActive && !_isPausedForReconnect)
+                {
+                    await HandleNetworkInstabilityAsync("Local network IP or adapter changed");
+                }
+            }
         }
 
         private async void OnNetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
@@ -80,7 +89,8 @@ namespace SelfishNetModern.Services
                         if (freshMac == null || freshMac.Equals(PhysicalAddress.None))
                         {
                             failureCount++;
-                            if (failureCount >= 2 && !_isPausedForReconnect)
+                            // Only trigger if sustained loss over multiple checks (15+ seconds) and network reports unavailable
+                            if (failureCount >= 5 && !NetworkInterface.GetIsNetworkAvailable() && !_isPausedForReconnect)
                             {
                                 await HandleNetworkInstabilityAsync("Gateway heartbeat lost (Router unreachable or resetting)");
                             }

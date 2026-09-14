@@ -281,6 +281,10 @@ namespace SelfishNetModern.ViewModels
 
         private void OnDeviceFound(NetworkDevice device)
         {
+            if (device == null) return;
+            if (!device.IsGateway && !device.IsSelf && !NetworkAdapterService.IsValidUnicastHost(device.IP, device.MAC, SelectedAdapter))
+                return;
+
             _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
             {
                 var existing = Devices.FirstOrDefault(d => d.MacString.Equals(device.MacString, StringComparison.OrdinalIgnoreCase) ||

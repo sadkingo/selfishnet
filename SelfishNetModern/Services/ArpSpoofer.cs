@@ -30,6 +30,8 @@ namespace SelfishNetModern.Services
         public void AddControlledDevice(NetworkDevice device)
         {
             if (device.IsGateway || device.IsSelf) return;
+            if (!NetworkAdapterService.IsValidUnicastHost(device.IP, device.MAC, _adapter)) return;
+
             _controlledDevices[device.MacString] = device;
             // Send immediate first poison burst
             SendPoisonPulseForDevice(device);
@@ -111,6 +113,9 @@ namespace SelfishNetModern.Services
             if (_adapter?.NativeDevice == null || _adapter.GatewayIp == null || _adapter.GatewayMac == null)
                 return;
 
+            if (!NetworkAdapterService.IsValidUnicastHost(device.IP, device.MAC, _adapter))
+                return;
+
             try
             {
                 // 1. Poison Target: Gateway is at Our MAC
@@ -140,6 +145,9 @@ namespace SelfishNetModern.Services
         public void HealDevice(NetworkDevice device)
         {
             if (_adapter?.NativeDevice == null || _adapter.GatewayIp == null || _adapter.GatewayMac == null)
+                return;
+
+            if (!NetworkAdapterService.IsValidUnicastHost(device.IP, device.MAC, _adapter))
                 return;
 
             try
