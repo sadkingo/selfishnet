@@ -207,12 +207,11 @@ namespace SelfishNetModern.ViewModels
             RefreshAdaptersCommand = new RelayCommand(LoadAdapters);
             ShowTermsCommand = new RelayCommand(ExecuteShowTerms);
 
-            // Initialize adapters, auto-start redirect by default, and begin subnet scan
+            // Initialize adapters and auto-start redirect by default (without automatic subnet scan)
             LoadAdapters();
             if (SelectedAdapter != null)
             {
                 StartRedirecting();
-                ExecuteScan();
             }
         }
 
@@ -409,10 +408,12 @@ namespace SelfishNetModern.ViewModels
                 controlledCount++;
             }
 
-            StatusMessage = $"Traffic control ACTIVE ({controlledCount} device(s) redirected).";
+            StatusMessage = controlledCount > 0 
+                ? $"Traffic control ACTIVE ({controlledCount} device(s) redirected)."
+                : "Ready. Click 'Scan Network' to discover local devices.";
             AddLog(controlledCount > 0 
                 ? $"Traffic redirection activated for {controlledCount} device(s)."
-                : "Traffic redirection engine started (monitoring incoming scan devices).");
+                : "Traffic redirection engine ready (will auto-redirect scanned devices).");
             UpdateDeviceCounts();
         }
 

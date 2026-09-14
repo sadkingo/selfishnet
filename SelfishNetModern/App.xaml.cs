@@ -9,6 +9,9 @@ namespace SelfishNetModern
         {
             base.OnStartup(e);
 
+            // Prevent WPF from automatically shutting down when the modal dialog closes before MainWindow is created
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
             if (!TermsOfUseDialog.HasAcceptedTerms())
             {
                 var terms = new TermsOfUseDialog();
@@ -19,6 +22,11 @@ namespace SelfishNetModern
                     return;
                 }
             }
+
+            var mainWindow = new MainWindow();
+            MainWindow = mainWindow;
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            mainWindow.Show();
         }
     }
 }
