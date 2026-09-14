@@ -7,6 +7,7 @@ namespace SelfishNetModern.Models
     public class AdapterInfo
     {
         public string Id { get; set; } = string.Empty;
+        public int InterfaceIndex { get; set; }
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public IPAddress IpAddress { get; set; } = IPAddress.None;

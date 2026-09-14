@@ -33,6 +33,13 @@ namespace SelfishNetModern.Services
             if (!NetworkAdapterService.IsValidUnicastHost(device.IP, device.MAC, _adapter)) return;
 
             _controlledDevices[device.MacString] = device;
+
+            // Lock local Windows ARP cache for target device so Windows never poisons itself
+            if (_adapter != null && _adapter.InterfaceIndex > 0)
+            {
+                NetworkAdapterService.LockArpEntry(_adapter.InterfaceIndex, device.IP, device.MAC);
+            }
+
             // Send immediate first poison burst
             SendPoisonPulseForDevice(device);
         }
@@ -41,6 +48,12 @@ namespace SelfishNetModern.Services
         {
             if (_controlledDevices.TryRemove(device.MacString, out _))
             {
+                // Unlock local Windows ARP cache
+                if (_adapter != null && _adapter.InterfaceIndex > 0)
+                {
+                    NetworkAdapterService.UnlockArpEntry(_adapter.InterfaceIndex, device.IP);
+                }
+
                 // Send healing packets to unpoison
                 HealDevice(device);
             }
@@ -53,6 +66,12 @@ namespace SelfishNetModern.Services
             {
                 LogMessage?.Invoke("Cannot start ARP spoofer: Adapter or Gateway information missing.");
                 return;
+            }
+
+            // Lock local Windows ARP cache for Gateway to protect our host from self-poisoning
+            if (_adapter.InterfaceIndex > 0)
+            {
+                NetworkAdapterService.LockArpEntry(_adapter.InterfaceIndex, _adapter.GatewayIp, _adapter.GatewayMac);
             }
 
             IsRunning = true;
@@ -75,6 +94,20 @@ namespace SelfishNetModern.Services
 
             // Heal all currently controlled devices
             HealAll();
+
+            // Unlock local Windows ARP cache for controlled devices and Gateway
+            if (_adapter != null && _adapter.InterfaceIndex > 0)
+            {
+                foreach (var device in _controlledDevices.Values)
+                {
+                    NetworkAdapterService.UnlockArpEntry(_adapter.InterfaceIndex, device.IP);
+                }
+                if (_adapter.GatewayIp != null)
+                {
+                    NetworkAdapterService.UnlockArpEntry(_adapter.InterfaceIndex, _adapter.GatewayIp);
+                }
+            }
+
             _controlledDevices.Clear();
             LogMessage?.Invoke("ARP Redirection engine stopped. All network caches healed.");
         }
@@ -85,6 +118,12 @@ namespace SelfishNetModern.Services
             {
                 try
                 {
+                    // Ensure gateway ARP entry remains locked and immune to self-poisoning
+                    if (_adapter != null && _adapter.GatewayIp != null && _adapter.GatewayMac != null && _adapter.InterfaceIndex > 0)
+                    {
+                        NetworkAdapterService.LockArpEntry(_adapter.InterfaceIndex, _adapter.GatewayIp, _adapter.GatewayMac);
+                    }
+
                     var devices = _controlledDevices.Values.Where(d => d.IsControlled && !d.IsGateway && !d.IsSelf).ToList();
                     foreach (var device in devices)
                     {

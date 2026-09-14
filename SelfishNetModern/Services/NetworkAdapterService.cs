@@ -29,6 +29,12 @@ namespace SelfishNetModern.Services
         [DllImport("iphlpapi.dll", SetLastError = true)]
         private static extern int GetIpNetTable(IntPtr pIpNetTable, ref int pdwSize, bool bOrder);
 
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int CreateIpNetEntry(ref MIB_IPNETROW pArpEntry);
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int DeleteIpNetEntry(ref MIB_IPNETROW pArpEntry);
+
         public static bool IsValidUnicastHost(IPAddress? ip, PhysicalAddress? mac, AdapterInfo? adapter = null)
         {
             if (ip == null || mac == null) return false;
@@ -145,6 +151,14 @@ namespace SelfishNetModern.Services
 
                 if (ipv4 == null) continue;
 
+                int ifIndex = 0;
+                try
+                {
+                    var ipv4Props = ipProps.GetIPv4Properties();
+                    ifIndex = ipv4Props != null ? ipv4Props.Index : 0;
+                }
+                catch { }
+
                 var gateway = ipProps.GatewayAddresses
                     .FirstOrDefault(g => g.Address.AddressFamily == AddressFamily.InterNetwork);
 
@@ -160,6 +174,7 @@ namespace SelfishNetModern.Services
                 var adapterInfo = new AdapterInfo
                 {
                     Id = ni.Id,
+                    InterfaceIndex = ifIndex,
                     Name = ni.Name,
                     Description = ni.Description,
                     IpAddress = ipv4.Address,
@@ -221,6 +236,39 @@ namespace SelfishNetModern.Services
             }
 
             return null;
+        }
+
+        public static void LockArpEntry(int interfaceIndex, IPAddress? ip, PhysicalAddress? mac)
+        {
+            if (interfaceIndex <= 0 || ip == null || mac == null) return;
+            try
+            {
+                var row = new MIB_IPNETROW();
+                row.dwIndex = interfaceIndex;
+                row.dwPhysAddrLen = 6;
+                row.bPhysAddr = new byte[8];
+                Array.Copy(mac.GetAddressBytes(), row.bPhysAddr, 6);
+                row.dwAddr = BitConverter.ToUInt32(ip.GetAddressBytes(), 0);
+                row.dwType = 4; // Static/Permanent in Windows
+                DeleteIpNetEntry(ref row);
+                CreateIpNetEntry(ref row);
+            }
+            catch { }
+        }
+
+        public static void UnlockArpEntry(int interfaceIndex, IPAddress? ip)
+        {
+            if (interfaceIndex <= 0 || ip == null) return;
+            try
+            {
+                var row = new MIB_IPNETROW();
+                row.dwIndex = interfaceIndex;
+                row.dwPhysAddrLen = 0;
+                row.bPhysAddr = new byte[8];
+                row.dwAddr = BitConverter.ToUInt32(ip.GetAddressBytes(), 0);
+                DeleteIpNetEntry(ref row);
+            }
+            catch { }
         }
     }
 }
